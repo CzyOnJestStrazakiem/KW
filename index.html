@@ -1,1 +1,114 @@
-uu
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard Ksiąg</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 2em; background: #f7f7f7; }
+    h1 { font-size: 1.5em; margin-bottom: 1em; }
+    .value { font-size: 2em; margin: 0.2em; }
+    .card { background: white; padding: 1em; margin: 1em auto; max-width: 400px; border-radius: 8px; box-shadow: 0 0 10px #ccc; }
+    canvas { width: 100%; max-width: 900px; height: 300px; margin: 2em auto; display: block; }
+    select { font-size: 1em; margin: 1em; padding: 0.3em 0.5em; }
+  </style>
+</head>
+<body>
+
+
+  <h1>📊 Dashboard Ksiąg Wieczystych</h1>
+
+  <div class="card">
+    <div>Księgi w 5 minut: <span id="v5" class="value">--</span></div>
+    <div>Księgi w 60 minut: <span id="v60" class="value">--</span></div>
+    <div>Wszystkie: <span id="total" class="value">--</span></div>
+    <div>Aktualizacja: <span id="timestamp">--</span></div>
+  </div>
+
+  <label for="zakres">Zakres wykresu:</label>
+  <select id="zakres">
+    <option value="60">Ostatnia godzina</option>
+    <option value="1440">Ostatnie 24 godziny</option>
+    <option value="all">Wszystko</option>
+  </select>
+
+  <canvas id="wykres5"></canvas>
+  <canvas id="wykres60"></canvas>
+  <canvas id="wykresTotal"></canvas>
+
+  <script>
+    const firebaseConfig = {
+      databaseURL: "https://oled-c78e1-default-rtdb.europe-west1.firebasedatabase.app"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const chart5 = createChart('wykres5', 'Księgi / 5 min', 'green');
+    const chart60 = createChart('wykres60', 'Księgi / 60 min', 'orange');
+    const chartTotal = createChart('wykresTotal', 'Księgi - łącznie', 'blue');
+
+    function updateUI(data) {
+      document.getElementById("v5").textContent = data.recent_5 ?? "--";
+      document.getElementById("v60").textContent = data.recent_60 ?? "--";
+      document.getElementById("total").textContent = data.total ?? "--";
+      document.getElementById("timestamp").textContent = data.timestamp?.replace("T", " ").substring(0, 19) ?? "--";
+    }
+
+    db.ref("statystyki").on("value", (snap) => {
+      const data = snap.val();
+      if (data) updateUI(data);
+    });
+
+    function createChart(canvasId, label, color) {
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      return new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: label, data: [], borderColor: color, backgroundColor: color + '20', tension: 0.3 }] },
+        options: {
+          aspectRatio: 3,
+          responsive: true,
+          scales: {
+            x: { title: { display: true, text: 'Czas' } },
+            y: { title: { display: true, text: label }, beginAtZero: false }
+          }
+        }
+      });
+    }
+
+    document.getElementById("zakres").addEventListener("change", renderCharts);
+
+    function renderCharts() {
+      const zakres = document.getElementById("zakres").value;
+      db.ref("statystyki_historyczne").once("value").then((snap) => {
+        const dane = snap.val();
+        if (!dane) return;
+
+        const godziny = Object.keys(dane);
+        const now = new Date();
+        const filtrowane = godziny.filter(ts => {
+          if (zakres === "all") return true;
+          const czas = new Date(ts);
+          return now - czas <= parseInt(zakres) * 60 * 1000;
+        });
+
+        const v5 = [], v60 = [], vTotal = [];
+        filtrowane.forEach(ts => {
+          const wpis = dane[ts];
+          v5.push(wpis.recent_5 ?? null);
+          v60.push(wpis.recent_60 ?? null);
+          vTotal.push(wpis.total ?? null);
+        });
+
+        [chart5, chart60, chartTotal].forEach(c => { c.data.labels = filtrowane; });
+        chart5.data.datasets[0].data = v5; chart5.update();
+        chart60.data.datasets[0].data = v60; chart60.update();
+        chartTotal.data.datasets[0].data = vTotal; chartTotal.update();
+      });
+    }
+
+    renderCharts();
+  </script>
+</body>
+</html>
